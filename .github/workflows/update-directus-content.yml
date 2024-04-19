@@ -1,0 +1,42 @@
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, edited, synchronize]
+
+jobs:
+  update-content-status:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl
+        
+    - name: Get changed files
+      id: changed_files
+      run: |
+        COMMIT_SHA=${{ github.event.pull_request.head.sha }}
+        CHANGED_FILES=$(curl -s "https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA" | jq '.files[].filename' | tr '\n' ' ')
+        echo "::set-output name=files::$CHANGED_FILES"
+        
+    - name: Update article status
+      env:
+        DIRECTUS_URL: ${{ secrets.DIRECTUS_URL }}
+        DIRECTUS_ACCESS_TOKEN: ${{ secrets.DIRECTUS_ACCESS_TOKEN }}
+      run: |
+        for file in ${{ steps.changed_files.outputs.files }}; do
+          if [[ $file =~ ^articles/ ]]; then
+            # Extract the article ID from the file
+            ARTICLE_ID=$(jq '.article_id' "$file")
+            
+            # Update the article status in Directus
+            curl -X PATCH \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $DIRECTUS_ACCESS_TOKEN" \
+              "$DIRECTUS_URL/items/articles?fields=status&filter[article_id]=$ARTICLE_ID" \
+              -d '{"status": "in_review"}'
+          fi
+        done
